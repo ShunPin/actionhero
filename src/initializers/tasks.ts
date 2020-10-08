@@ -35,7 +35,7 @@ export class Tasks extends Initializer {
       globalMiddleware: [],
     };
 
-    api.tasks.loadFile = (fullFilePath: string, reload: boolean = false) => {
+    api.tasks.loadFile = (fullFilePath: string, reload = false) => {
       let task;
       let collection = require(fullFilePath);
       for (const i in collection) {
@@ -69,6 +69,7 @@ export class Tasks extends Initializer {
       if (task.frequency > 0) {
         if (plugins.indexOf("JobLock") < 0) {
           plugins.push("JobLock");
+          pluginOptions.JobLock = { reEnqueue: false };
         }
         if (plugins.indexOf("QueueLock") < 0) {
           plugins.push("QueueLock");
@@ -163,12 +164,13 @@ export class Tasks extends Initializer {
     };
 
     api.tasks.loadTasks(false);
+
+    // we want to start the queue now, so that it's available for other initializers and CLI commands
+    await api.resque.startQueue();
   }
 
   async start(config) {
-    if (config.redis.enabled === false) {
-      return;
-    }
+    if (config.redis.enabled === false) return;
 
     if (config.tasks.scheduler === true) {
       await taskModule.enqueueAllRecurrentTasks();

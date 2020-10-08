@@ -1,7 +1,6 @@
 import * as path from "path";
 import * as glob from "glob";
 import * as fs from "fs";
-import { Api } from "./api";
 import { buildConfig, ConfigInterface } from "./../modules/config";
 import { log } from "../modules/log";
 import { Initializer } from "./initializer";
@@ -363,16 +362,20 @@ export class Process {
       log(`[ SIGNAL ] - SIGINT`, "notice");
       let timer = awaitHardStop();
       await this.stop();
-      clearTimeout(timer);
-      stopCallback(0);
+      if (!this.shuttingDown) {
+        clearTimeout(timer);
+        stopCallback(0);
+      }
     });
 
     process.on("SIGTERM", async () => {
       log(`[ SIGNAL ] - SIGTERM`, "notice");
       let timer = awaitHardStop();
       await this.stop();
-      clearTimeout(timer);
-      stopCallback(0);
+      if (!this.shuttingDown) {
+        clearTimeout(timer);
+        stopCallback(0);
+      }
     });
 
     process.on("SIGUSR2", async () => {

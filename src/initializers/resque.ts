@@ -43,9 +43,7 @@ export class Resque extends Initializer {
   }
 
   async initialize(config) {
-    if (config.redis.enabled === false) {
-      return;
-    }
+    if (config.redis.enabled === false) return;
 
     const resqueOverrides = config.tasks.resque_overrides;
 
@@ -95,6 +93,7 @@ export class Resque extends Initializer {
             connection: api.resque.connectionDetails,
             timeout: config.tasks.timeout,
             stuckWorkerTimeout: config.tasks.stuckWorkerTimeout,
+            retryStuckJobs: config.tasks.retryStuckJobs,
           });
 
           api.resque.scheduler.on("error", (error) => {
@@ -264,9 +263,7 @@ export class Resque extends Initializer {
   }
 
   async start(config) {
-    if (config.redis.enabled === false) {
-      return;
-    }
+    if (config.redis.enabled === false) return;
 
     if (
       config.tasks.minTaskProcessors === 0 &&
@@ -275,15 +272,12 @@ export class Resque extends Initializer {
       config.tasks.minTaskProcessors = 1;
     }
 
-    await api.resque.startQueue();
     await api.resque.startScheduler();
     await api.resque.startMultiWorker();
   }
 
   async stop(config) {
-    if (config.redis.enabled === false) {
-      return;
-    }
+    if (config.redis.enabled === false) return;
 
     await api.resque.stopScheduler();
     await api.resque.stopMultiWorker();

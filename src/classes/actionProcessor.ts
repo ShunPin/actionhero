@@ -4,22 +4,24 @@ import { config } from "./../modules/config";
 import { log } from "../modules/log";
 import { utils } from "../modules/utils";
 import * as dotProp from "dot-prop";
-import { EOL } from "os";
 import { api } from "../index";
 
-export class ActionProcessor {
+export class ActionProcessor<ActionClass extends Action> {
   connection: Connection;
-  action: string;
+  action: ActionClass["name"];
   toProcess: boolean;
   toRender: boolean;
   messageId: number | string;
   params: {
+    action: string;
+    apiVersion: string | number;
     [key: string]: any;
   };
+  // params: ActionClass["inputs"];
   missingParams: Array<string>;
   validatorErrors: Array<string | Error>;
   actionStartTime: number;
-  actionTemplate: Action;
+  actionTemplate: ActionClass;
   working: boolean;
   response: {
     [key: string]: any;
@@ -36,7 +38,10 @@ export class ActionProcessor {
     this.toProcess = true;
     this.toRender = true;
     this.messageId = connection.messageId || 0;
-    this.params = Object.assign({}, connection.params);
+    this.params = Object.assign(
+      { action: null, apiVersion: null },
+      connection.params
+    );
     this.missingParams = [];
     this.validatorErrors = [];
     this.actionStartTime = null;
@@ -103,18 +108,18 @@ export class ActionProcessor {
     this.incrementPendingActions(-1);
     this.duration = new Date().getTime() - this.actionStartTime;
     this.working = false;
-    this.logAction(error);
+    this.logAndReportAction(error);
     return this;
   }
 
-  private logAction(error) {
+  private logAndReportAction(error) {
     let logLevel = "info";
     if (this.actionTemplate && this.actionTemplate.logLevel) {
       logLevel = this.actionTemplate.logLevel;
     }
 
     const filteredParams = utils.filterObjectForLogging(this.params);
-    const logLine = {
+    let logLine = {
       to: this.connection.remoteIP,
       action: this.action,
       params: JSON.stringify(filteredParams),
@@ -130,23 +135,35 @@ export class ActionProcessor {
     }
 
     if (error) {
-      logLevel = "error";
-      if (error instanceof Error) {
-        logLine.error = error.toString();
-        Object.getOwnPropertyNames(error)
-          .filter((prop) => prop !== "message")
-          .sort((a, b) => (a === "stack" || b === "stack" ? -1 : 1))
-          .forEach((prop) => (logLine[prop] = error[prop]));
-      } else {
-        try {
-          logLine.error = JSON.stringify(error);
-        } catch (e) {
-          logLine.error = String(error);
-        }
-      }
+      let errorFields;
+      const formatErrorLogLine =
+        config.errors.serializers.actionProcessor ||
+        this.applyDefaultErrorLogLineFormat;
+      ({ logLevel = "error", errorFields } = formatErrorLogLine(error));
+      logLine = { ...logLine, ...errorFields };
     }
 
     log(`[ action @ ${this.connection.type} ]`, logLevel, logLine);
+    if (error) api.exceptionHandlers.action(error, logLine);
+  }
+
+  private applyDefaultErrorLogLineFormat(error) {
+    const errorFields: { error: string } = { error: null };
+    if (error instanceof Error) {
+      errorFields.error = error.toString();
+      Object.getOwnPropertyNames(error)
+        .filter((prop) => prop !== "message")
+        .sort((a, b) => (a === "stack" || b === "stack" ? -1 : 1))
+        .forEach((prop) => (errorFields[prop] = error[prop]));
+    } else {
+      try {
+        errorFields.error = JSON.stringify(error);
+      } catch (e) {
+        errorFields.error = String(error);
+      }
+    }
+
+    return { errorFields };
   }
 
   private async preProcessAction() {
@@ -330,6 +347,8 @@ export class ActionProcessor {
             api.actions.versions[this.action].length - 1
           ];
       }
+
+      //@ts-ignore
       this.actionTemplate =
         api.actions.actions[this.action][this.params.apiVersion];
     }
@@ -360,7 +379,11 @@ export class ActionProcessor {
 
   private async runAction() {
     try {
-      await this.preProcessAction();
+      const preProcessResponse = await this.preProcessAction();
+      if (preProcessResponse !== undefined && preProcessResponse !== null) {
+        Object.assign(this.response, preProcessResponse);
+      }
+
       await this.reduceParams();
       await this.validateParams();
       this.lockParams();
@@ -378,8 +401,16 @@ export class ActionProcessor {
 
     if (this.toProcess === true) {
       try {
-        await this.actionTemplate.run(this);
-        await this.postProcessAction();
+        const actionResponse = await this.actionTemplate.run(this);
+        if (actionResponse !== undefined && actionResponse !== null) {
+          Object.assign(this.response, actionResponse);
+        }
+
+        const postProcessResponse = await this.postProcessAction();
+        if (postProcessResponse !== undefined && postProcessResponse !== null) {
+          Object.assign(this.response, postProcessResponse);
+        }
+
         return this.completeAction();
       } catch (error) {
         return this.completeAction(error);
